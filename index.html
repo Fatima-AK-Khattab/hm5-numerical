@@ -1,0 +1,330 @@
+﻿<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>جامعة تكريت - واجب التحليلات العددية HW5</title>
+    
+    <!-- استيراد المكتبات الأساسية -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <!-- إعداد مكتبة المعادلات الرياضية بطريقة آمنة -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <style>
+        body { font-family: 'Cairo', sans-serif; background-color: #f0f4f8; }
+        .main-card { background: white; border-radius: 2.5rem; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15); }
+        .no-select { user-select: none; }
+        input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+        .math-display-box { font-family: serif; font-size: 1.25rem; background: #f8fafc; padding: 1.5rem; border-radius: 1.5rem; border-right: 6px solid #1e3a8a; direction: ltr; text-align: center; margin: 15px 0; }
+        .progress-bar { height: 8px; border-radius: 10px; transition: width 0.5s ease-in-out; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // --- ضعي رابط الـ Web App الخاص بكِ هنا ---
+        const GOOGLE_SCRIPT_URL = "YOUR_WEB_APP_URL_HERE";
+
+        function App() {
+            // استعادة الحالة من localStorage لضمان عدم فقدان البيانات
+            const [step, setStep] = useState(() => localStorage.getItem('hw5_active_step') || 'register');
+            const [studentInfo, setStudentInfo] = useState(() => JSON.parse(localStorage.getItem('hw5_info')) || { name: '', studyType: 'صباحي A' });
+            const [ans, setAns] = useState(() => JSON.parse(localStorage.getItem('hw5_ans')) || {});
+            const [fullFile, setFullFile] = useState(null);
+            const [loading, setLoading] = useState(false);
+
+            // حفظ البيانات تلقائياً
+            useEffect(() => {
+                localStorage.setItem('hw5_active_step', step);
+                localStorage.setItem('hw5_info', JSON.stringify(studentInfo));
+                localStorage.setItem('hw5_ans', JSON.stringify(ans));
+            }, [step, studentInfo, ans]);
+
+            // تحديث MathJax عند كل تغيير في الخطوات
+            useEffect(() => {
+                if (window.MathJax && window.MathJax.typesetPromise) {
+                    window.MathJax.typesetPromise();
+                }
+            }, [step, studentInfo.name]);
+
+            // توليد المتغيرات العشوائية الثابتة لكل طالب بناءً على اسمه
+            const params = useMemo(() => {
+                if (!studentInfo.name || studentInfo.name.trim().length < 5) return { x_target: 1.5, h: 0.5, x0_pos: 5, x0_neg: -5 };
+                
+                // تنظيف الاسم لتوليد بصمة ثابتة
+                const fingerprint = studentInfo.name.replace(/\s+/g, "");
+                const seed = fingerprint.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+                
+                // تحديد h: إما 0.5 أو 1
+                const h = (seed % 2 === 0) ? 0.5 : 1.0;
+                
+                // تحديد x_target: يجب أن يكون من مضاعفات h
+                const x_options = h === 0.5 ? [1.5, 2, 2.5, 3] : [2, 3];
+                const x_target = x_options[seed % x_options.length];
+                
+                // تحديد x0: بين 1 و 5
+                const x0_pos = (seed % 5) + 1;
+                const x0_neg = -((seed % 5) + 1);
+
+                return { x_target, h, x0_pos, x0_neg };
+            }, [studentInfo.name]);
+
+            // محرك التصحيح الرياضي (ODE & Newton Raphson)
+            const calculateModelAnswers = () => {
+                // Q1 Solver: dy/dx = x^2 + y^2, y(0)=1
+                const f = (x, y) => x*x + y*y;
+                const h = params.h;
+                const target = params.x_target;
+                const nSteps = Math.round(target / h);
+
+                // Euler Method
+                let y_euler = 1;
+                for(let i=0; i < nSteps; i++) {
+                    y_euler += h * f(i*h, y_euler);
+                }
+
+                // Newton Raphson Helper
+                const solveNR = (polyType, startX) => {
+                    let x = startX;
+                    const f_q2 = (x) => Math.pow(x,4) - 4*Math.pow(x,3) - 7*x*x + 34*x - 24;
+                    const df_q2 = (x) => 4*Math.pow(x,3) - 12*x*x - 14*x + 34;
+                    const f_q3 = (x) => Math.pow(x,4) + 5*Math.pow(x,3) - 10*x*x - 80*x - 96;
+                    const df_q3 = (x) => 4*Math.pow(x,3) + 15*x*x - 20*x - 80;
+
+                    const func = (polyType === 2) ? f_q2 : f_q3;
+                    const deriv = (polyType === 2) ? df_q2 : df_q3;
+
+                    for(let i=0; i<10; i++) {
+                        const fx = func(x);
+                        const dfx = deriv(x);
+                        if (Math.abs(dfx) < 0.0001) break;
+                        x = x - fx/dfx;
+                    }
+                    return x;
+                };
+
+                return {
+                    q1: { euler: y_euler },
+                    q2: { pos: solveNR(2, params.x0_pos), neg: solveNR(2, params.x0_neg) },
+                    q3: { pos: solveNR(3, params.x0_pos), neg: solveNR(3, params.x0_neg) }
+                };
+            };
+
+            const calculateGrade = (model) => {
+                let score = 0;
+                const check = (studentVal, modelVal) => Math.trunc(Math.abs(parseFloat(studentVal||0))) === Math.trunc(Math.abs(modelVal));
+
+                // تقسيم الدرجات (مثلاً: 2.5 لكل سؤال + 2.5 للملف)
+                if (ans.q1a && ans.q1b && ans.q1c) score += 2.5; // السؤال الأول
+                
+                let q2_correct = 0;
+                if(check(ans.q2pos, model.q2.pos)) q2_correct++;
+                if(check(ans.q2neg, model.q2.neg)) q2_correct++;
+                score += (q2_correct === 2) ? 2.5 : (q2_correct === 1 ? 1.5 : 0.5);
+
+                let q3_correct = 0;
+                if(check(ans.q3pos, model.q3.pos)) q3_correct++;
+                if(check(ans.q3neg, model.q3.neg)) q3_correct++;
+                score += (q3_correct === 2) ? 2.5 : (q3_correct === 1 ? 1.5 : 0.5);
+
+                if (fullFile) score += 2.5;
+
+                return score.toFixed(2);
+            };
+
+            const handleFile = (e) => {
+                const file = e.target.files[0];
+                if (file && file.size <= 8 * 1024 * 1024) {
+                    const reader = new FileReader();
+                    reader.onload = () => setFullFile(reader.result.split(',')[1]);
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const submitAssignment = async () => {
+                if(!fullFile) return alert("يرجى رفع ملف الحل بصيغة PDF أولاً");
+                setLoading(true);
+                const model = calculateModelAnswers();
+                const grade = calculateGrade(model);
+
+                const payload = {
+                    name: studentInfo.name, studyType: studentInfo.studyType, grade: grade,
+                    params: params, ans: ans, modelAnswers: model, fullFile: fullFile,
+                    time: new Date().toLocaleString('ar-IQ')
+                };
+
+                try {
+                    await fetch(GOOGLE_SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
+                    localStorage.clear(); // مسح البيانات بعد النجاح
+                    setStep('success');
+                } catch (e) { alert("حدث خطأ في الاتصال"); } finally { setLoading(false); }
+            };
+
+            const isPageInvalid = () => {
+                if (step === 'register') return studentInfo.name.trim().split(/\s+/).length < 3;
+                if (step === 'q1') return !ans.q1a || !ans.q1b || !ans.q1c;
+                if (step === 'q2') return !ans.q2pos || !ans.q2neg;
+                if (step === 'q3') return !ans.q3pos || !ans.q3neg;
+                return false;
+            };
+
+            const getProgress = () => {
+                const map = { q1: 1, q2: 2, q3: 3, upload: 4 };
+                return (map[step] / 4) * 100;
+            };
+
+            return (
+                <div className="min-h-screen py-8 px-4 flex flex-col items-center">
+                    <div className="w-full max-w-2xl main-card overflow-hidden border-t-[16px] border-blue-900 transition-all no-select">
+                        
+                        {/* Progress Bar */}
+                        {step !== 'register' && step !== 'success' && (
+                            <div className="bg-slate-100 w-full h-2">
+                                <div className="bg-blue-600 progress-bar shadow-[0_0_10px_rgba(37,99,235,0.3)]" style={{ width: `${getProgress()}%` }}></div>
+                            </div>
+                        )}
+
+                        <div className="p-6 bg-slate-50 border-b flex justify-between items-center">
+                            <div className="text-right">
+                                <h1 className="text-xl font-black text-blue-900 leading-tight">جامعة تكريت - قسم الهندسة المدنية</h1>
+                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Numerical Analysis HW5</p>
+                            </div>
+                            <div className="bg-blue-900 text-white px-3 py-1 rounded-xl font-black text-xs italic">2026</div>
+                        </div>
+
+                        {step === 'register' && (
+                            <div className="p-10 text-right animate-in fade-in duration-500">
+                                <h2 className="text-xl font-black mb-8 border-r-8 border-blue-600 pr-3 text-slate-800">بيانات الطالب</h2>
+                                <input type="text" placeholder="الاسم الثلاثي باللغة العربية" className="w-full p-4 border-2 rounded-3xl mb-4 outline-none focus:border-blue-900 shadow-sm" onChange={e => setStudentInfo({...studentInfo, name: e.target.value})} value={studentInfo.name} />
+                                <select className="w-full p-4 border-2 rounded-3xl mb-10 bg-white font-bold outline-none" onChange={e => setStudentInfo({...studentInfo, studyType: e.target.value})} value={studentInfo.studyType}>
+                                    <option>صباحي A</option><option>صباحي B</option><option>صباحي C</option><option>فصلي</option><option>مسائي</option>
+                                </select>
+                                <button onClick={() => !isPageInvalid() && setStep('q1')} disabled={isPageInvalid()} className="w-full bg-blue-900 text-white font-black py-5 rounded-3xl shadow-xl disabled:opacity-20 hover:bg-blue-800 text-xl transition-all">دخول للواجب</button>
+                            </div>
+                        )}
+
+                        {step === 'q1' && (
+                            <div className="p-8 text-right animate-in slide-in-from-left duration-500">
+                                <h3 className="font-black text-blue-900 mb-6 border-b pb-2 flex justify-between"><span>السؤال الأول</span><span className="text-slate-400 text-xs">1 / 3</span></h3>
+                                <div className="math-display-box">
+                                    Q1: If {"\\( \\frac{dy}{dx} = x^2 + y^2 \\)"} and {"\\( [y(0)=1] \\)"} find (y) at {"\\( [x = " + params.x_target + "] \\)"} and {"\\( [h = " + params.h + "] \\)"}, by using:
+                                </div>
+                                <div className="space-y-4">
+                                    {['a- Euler Method', 'b- Modified Euler Method', 'c- Runge-Kutta Method'].map((method, i) => (
+                                        <div key={i}>
+                                            <label className="text-[10px] font-bold text-slate-400 mr-2 uppercase">{method}</label>
+                                            <input type="number" step="any" placeholder="الناتج النهائي..." className="w-full p-4 border-2 rounded-2xl text-center font-mono focus:border-blue-900" onChange={e => setAns({...ans, ['q1'+['a','b','c'][i]]: e.target.value})} value={ans['q1'+['a','b','c'][i]] || ''} />
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex gap-4 mt-12">
+                                    <button onClick={() => setStep('register')} className="flex-1 bg-slate-100 py-4 rounded-3xl font-bold text-slate-500 hover:bg-slate-200 transition">Back</button>
+                                    <button onClick={() => !isPageInvalid() && setStep('q2')} disabled={isPageInvalid()} className="flex-[2] bg-blue-900 text-white py-4 rounded-3xl font-black shadow-lg disabled:opacity-20">السؤال التالي</button>
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 'q2' && (
+                            <div className="p-8 text-right animate-in slide-in-from-left duration-500">
+                                <h3 className="font-black text-blue-900 mb-6 border-b pb-2 flex justify-between"><span>السؤال الثاني</span><span className="text-slate-400 text-xs">2 / 3</span></h3>
+                                <div className="math-display-box text-[1rem]">
+                                    Q2: The equation has 3 positive and 1 negative root:
+                                    <br />{"\\[ x^4 - 4x^3 - 7x^2 + 34x - 24 = 0 \\]"}
+                                    Approximate one positive root and the negative root by starting {"\\( x^{\\circ} = " + params.x0_pos + " \\)"} and {"\\( x^{\\circ} = " + params.x0_neg + " \\)"} respectively, using Newton-Raphson.
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 block text-center mb-1">Positive Root</label>
+                                        <input type="number" step="any" className="w-full p-4 border-2 rounded-2xl text-center font-mono focus:border-blue-900" onChange={e => setAns({...ans, q2pos: e.target.value})} value={ans.q2pos || ''} />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 block text-center mb-1">Negative Root</label>
+                                        <input type="number" step="any" className="w-full p-4 border-2 rounded-2xl text-center font-mono focus:border-blue-900" onChange={e => setAns({...ans, q2neg: e.target.value})} value={ans.q2neg || ''} />
+                                    </div>
+                                </div>
+                                <div className="flex gap-4 mt-12">
+                                    <button onClick={() => setStep('q1')} className="flex-1 bg-slate-100 py-4 rounded-3xl font-bold text-slate-500">Back</button>
+                                    <button onClick={() => !isPageInvalid() && setStep('q3')} disabled={isPageInvalid()} className="flex-[2] bg-blue-900 text-white py-4 rounded-3xl font-black shadow-lg disabled:opacity-20">السؤال الثالث</button>
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 'q3' && (
+                            <div className="p-8 text-right animate-in slide-in-from-left duration-500">
+                                <h3 className="font-black text-blue-900 mb-6 border-b pb-2 flex justify-between"><span>السؤال الثالث</span><span className="text-slate-400 text-xs">3 / 3</span></h3>
+                                <div className="math-display-box text-[1rem]">
+                                    Q3: The equation has 3 negative and 1 positive root:
+                                    <br />{"\\[ x^4 + 5x^3 - 10x^2 - 80x - 96 = 0 \\]"}
+                                    Approximate one positive root and the negative root by starting {"\\( x^{\\circ} = " + params.x0_pos + " \\)"} and {"\\( x^{\\circ} = " + params.x0_neg + " \\)"} respectively, using Newton-Raphson.
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 block text-center mb-1">Positive Root</label>
+                                        <input type="number" step="any" className="w-full p-4 border-2 rounded-2xl text-center font-mono focus:border-blue-900" onChange={e => setAns({...ans, q3pos: e.target.value})} value={ans.q3pos || ''} />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 block text-center mb-1">Negative Root</label>
+                                        <input type="number" step="any" className="w-full p-4 border-2 rounded-2xl text-center font-mono focus:border-blue-900" onChange={e => setAns({...ans, q3neg: e.target.value})} value={ans.q3neg || ''} />
+                                    </div>
+                                </div>
+                                <div className="flex gap-4 mt-12">
+                                    <button onClick={() => setStep('q2')} className="flex-1 bg-slate-100 py-4 rounded-3xl font-bold text-slate-500">Back</button>
+                                    <button onClick={() => !isPageInvalid() && setStep('upload')} disabled={isPageInvalid()} className="flex-[2] bg-blue-900 text-white py-4 rounded-3xl font-black shadow-lg disabled:opacity-20">الانتقال للرفع النهائي</button>
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 'upload' && (
+                            <div className="p-10 text-center animate-in zoom-in duration-500">
+                                <h3 className="text-xl font-black mb-10 text-blue-900 underline underline-offset-8 decoration-blue-100 italic">ارفق ملف الحل الكامل (PDF)</h3>
+                                <div className="border-4 border-dashed p-14 rounded-[3.5rem] bg-slate-50 mb-10 border-blue-50 flex flex-col items-center group hover:border-blue-300 transition-colors cursor-pointer">
+                                    <input type="file" accept="application/pdf" id="pdf_f" className="hidden" onChange={handleFile} />
+                                    <label htmlFor="pdf_f" className="cursor-pointer">
+                                        <div className="text-8xl mb-6 group-hover:scale-110 transition-transform">📄</div>
+                                        <p className="font-black text-slate-600 mb-2">{fullFile ? "✅ تم اختيار ملف الحل النهائي" : "اضغط لاختيار ملف PDF الكامل"}</p>
+                                        <p className="text-[10px] text-slate-400 font-bold italic">يجب أن يضم الملف حل جميع الأسئلة الثلاثة يدوياً</p>
+                                    </label>
+                                </div>
+                                <div className="flex gap-4">
+                                    <button onClick={() => setStep('q3')} className="flex-1 bg-slate-100 py-5 rounded-3xl font-bold text-slate-400">رجوع للأسئلة</button>
+                                    <button onClick={submitAssignment} disabled={loading || !fullFile} className="flex-[2] bg-green-600 text-white py-5 rounded-3xl font-black text-2xl shadow-xl disabled:opacity-30 active:scale-95 transition-all">
+                                        {loading ? "جاري الإرسال..." : "تأكيد التسليم النهائي"}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 'success' && (
+                            <div className="p-20 text-center bg-white shadow-inner">
+                                <div className="text-8xl mb-8 animate-bounce">🎓</div>
+                                <h2 className="text-2xl font-black mb-10 text-blue-900 leading-loose">
+                                    لقد تم استلام اجابتك بنجاح يا <br/>
+                                    <span className="text-blue-700 underline underline-offset-8 decoration-2">{studentInfo.name}</span> <br/>
+                                    شكراً لك على المشاركة في الواجب الخامس.
+                                </h2>
+                                <div className="p-5 border-4 border-double border-blue-900 rounded-[2.5rem] text-blue-900 font-black text-sm inline-block tracking-tight">جامعة تكريت - قسم الهندسة المدنية</div>
+                                <div className="mt-12">
+                                    <button onClick={() => setStep('register')} className="text-xs text-slate-300 font-bold hover:text-blue-900 transition-colors border-b border-transparent hover:border-blue-900 pb-1 italic">هل تريد مراجعة بياناتك؟ العودة للدخول</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <footer className="mt-8 text-center text-slate-400 text-[8px] font-bold uppercase tracking-widest italic select-none">Numerical Analysis - HW5 - Tikrit University 2026</footer>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
